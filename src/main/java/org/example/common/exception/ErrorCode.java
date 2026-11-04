@@ -19,7 +19,11 @@ public enum ErrorCode {
     RESOURCE_NOT_FOUND(1001, "Tài nguyên không tồn tại trong hệ thống", HttpStatus.NOT_FOUND),
     RESOURCE_ALREADY_EXISTS(1002, "Tài nguyên đã tồn tại", HttpStatus.CONFLICT),
     USER_NOT_FOUND(2001, "Không tìm thấy thông tin người dùng", HttpStatus.NOT_FOUND),
-    INVALID_CREDENTIALS(2002, "Thông tin đăng nhập không chính xác", HttpStatus.UNAUTHORIZED);
+    INVALID_CREDENTIALS(2002, "Email/Số điện thoại hoặc mật khẩu không chính xác", HttpStatus.UNAUTHORIZED),
+    EMAIL_ALREADY_EXISTS(2003, "Email đã được đăng ký trên hệ thống", HttpStatus.CONFLICT),
+    PHONE_ALREADY_EXISTS(2004, "Số điện thoại đã được đăng ký trên hệ thống", HttpStatus.CONFLICT),
+    USER_INACTIVE(2005, "Tài khoản của bạn hiện đang bị tạm khóa", HttpStatus.FORBIDDEN),
+    INVALID_TOKEN(2006, "Token không hợp lệ hoặc phiên đăng nhập đã hết hạn", HttpStatus.UNAUTHORIZED);
 
     private final int code;
     private final String message;
@@ -31,4 +35,3 @@ public enum ErrorCode {
         this.httpStatus = httpStatus;
     }
 }
-
