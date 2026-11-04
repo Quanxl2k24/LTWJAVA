@@ -27,8 +27,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ErrorCode errorCode = ex.getErrorCode();
         log.warn("Application business exception occurred: code={}, message={}", errorCode.getCode(), ex.getMessage());
 
+        HttpHeaders headers = new HttpHeaders();
+        if (errorCode.getHttpStatus() == HttpStatus.UNAUTHORIZED) {
+            headers.add(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"unauthorized\"");
+        }
+
         ApiResponse<Void> response = ApiResponse.error(errorCode, ex.getMessage());
-        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+        return new ResponseEntity<>(response, headers, errorCode.getHttpStatus());
     }
 
     @Override
