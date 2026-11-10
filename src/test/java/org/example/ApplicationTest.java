@@ -39,6 +39,7 @@ class ApplicationTest {
     }
 
     private static String savedRefreshTokenCookie;
+    private static String savedPatientAccessToken;
 
     @Test
     @Order(1)
@@ -188,6 +189,7 @@ class ApplicationTest {
         assertThat(refreshCookie).contains("Max-Age=2592000"); // 30 ngày = 2,592,000s
 
         savedRefreshTokenCookie = refreshCookie.split(";")[0]; // "refreshToken=..."
+        savedPatientAccessToken = loginData.getAccessToken();
     }
 
     @Test
@@ -252,6 +254,161 @@ class ApplicationTest {
 
         assertThat(clearedCookie).isNotNull();
         assertThat(clearedCookie).contains("Max-Age=0");
+    }
+
+    @Test
+    @Order(11)
+    void shouldGetAllRolesSuccessfully() {
+        ResponseEntity<ApiResponse<List<org.example.feature.role.dto.RoleResponse>>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/roles",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<List<org.example.feature.role.dto.RoleResponse>>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(200);
+
+        List<org.example.feature.role.dto.RoleResponse> roles = response.getBody().getData();
+        assertThat(roles).isNotEmpty();
+        assertThat(roles).hasSize(4);
+        assertThat(roles).extracting(org.example.feature.role.dto.RoleResponse::getCode)
+                .containsExactlyInAnyOrder("ADMIN", "DOCTOR", "STAFF", "PATIENT");
+    }
+
+    @Test
+    @Order(12)
+    void shouldRejectAccessWhenNoTokenProvided() {
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/auth/me",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(401);
+    }
+
+    @Test
+    @Order(13)
+    void shouldRejectAccessWhenTokenIsInvalid() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth("invalid.fake.jwt.token");
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/auth/me",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(2006); // INVALID_TOKEN
+    }
+
+    @Test
+    @Order(14)
+    void shouldAllowAccessToMeEndpointWithValidToken() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        ResponseEntity<ApiResponse<org.example.common.security.UserPrincipal>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/auth/me",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<org.example.common.security.UserPrincipal>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(200);
+        assertThat(response.getBody().getData().getRole()).isEqualTo("PATIENT");
+        assertThat(response.getBody().getData().getPhone()).isEqualTo("0912345678");
+    }
+
+    @Test
+    @Order(15)
+    void shouldReturnForbiddenWhenPatientAccessesAdminOnlyEndpoint() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/roles/admin-only",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(403);
+    }
+
+    @Test
+    @Order(16)
+    void shouldReturnForbiddenWhenPatientAccessesMultiRoleEndpointRequiringAdminOrStaff() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/roles/staff-or-admin",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(403);
+    }
+
+    @Test
+    @Order(17)
+    void shouldAllowAdminToAccessBothAdminAndMultiRoleEndpoints() {
+        // 1. Đăng nhập với tài khoản Admin mặc định
+        LoginRequest adminLogin = LoginRequest.builder()
+                .identifier("admin@hospital.com")
+                .password("Admin@123456")
+                .build();
+
+        ResponseEntity<ApiResponse<LoginResponse>> loginResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/auth/login",
+                HttpMethod.POST,
+                new HttpEntity<>(adminLogin),
+                new ParameterizedTypeReference<ApiResponse<LoginResponse>>() {}
+        );
+
+        assertThat(loginResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String adminAccessToken = loginResponse.getBody().getData().getAccessToken();
+        assertThat(adminAccessToken).isNotBlank();
+
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(adminAccessToken);
+
+        // 2. Thử gọi API admin-only
+        ResponseEntity<ApiResponse<String>> adminOnlyResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/roles/admin-only",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<String>>() {}
+        );
+        assertThat(adminOnlyResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(adminOnlyResponse.getBody().getCode()).isEqualTo(200);
+
+        // 3. Thử gọi API cho phép nhiều vai trò (ADMIN hoặc STAFF)
+        ResponseEntity<ApiResponse<String>> multiRoleResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/roles/staff-or-admin",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<String>>() {}
+        );
+        assertThat(multiRoleResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(multiRoleResponse.getBody().getCode()).isEqualTo(200);
+        assertThat(multiRoleResponse.getBody().getData()).isEqualTo("ADMIN");
     }
 
     private String getLocalServerUrl() {

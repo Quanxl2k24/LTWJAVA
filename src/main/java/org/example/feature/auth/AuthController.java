@@ -7,6 +7,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.common.api.ApiResponse;
+import org.example.common.security.CurrentUser;
+import org.example.common.security.RequireRole;
+import org.example.common.security.UserPrincipal;
 import org.example.feature.auth.dto.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -56,6 +59,13 @@ public class AuthController {
 
         authService.logout(httpRequest, httpResponse);
         return ApiResponse.success("Đăng xuất thành công", null);
+    }
+
+    @GetMapping("/me")
+    @RequireRole
+    @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Lấy thông tin tài khoản và vai trò đang đăng nhập từ Bearer Access Token")
+    public ApiResponse<UserPrincipal> getCurrentUser(@CurrentUser UserPrincipal currentUser) {
+        return ApiResponse.success("Lấy thông tin người dùng thành công", currentUser);
     }
 }
 
