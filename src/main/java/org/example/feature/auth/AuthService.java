@@ -47,12 +47,12 @@ public class AuthService {
             }
         }
 
-        // 3. Gán quyền mặc định là Bệnh nhân (PATIENT)
+        // 3. Gán quyền mặc định là Khách hàng (PATIENT)
         Role patientRole = roleRepository.findByCode("PATIENT")
                 .orElseGet(() -> roleRepository.save(Role.builder()
                         .code("PATIENT")
-                        .name("Bệnh nhân")
-                        .description("Bệnh nhân")
+                        .name("Khách hàng")
+                        .description("Khách hàng")
                         .build()));
 
         // 4. Mã hóa mật khẩu
