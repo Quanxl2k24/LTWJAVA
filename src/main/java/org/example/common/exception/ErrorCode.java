@@ -33,7 +33,12 @@ public enum ErrorCode {
     SPECIALTY_NOT_FOUND(3001, "Không tìm thấy thông tin chuyên khoa yêu cầu", HttpStatus.NOT_FOUND),
     SPECIALTY_NAME_EXISTS(3002, "Tên chuyên khoa đã tồn tại trên hệ thống", HttpStatus.CONFLICT),
     SPECIALTY_SLUG_EXISTS(3003, "Đường dẫn slug chuyên khoa đã được sử dụng", HttpStatus.CONFLICT),
-    CANNOT_DELETE_SPECIALTY_HAS_DOCTORS(3004, "Không thể xóa chuyên khoa do đang có bác sĩ trực thuộc. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT);
+    CANNOT_DELETE_SPECIALTY_HAS_DOCTORS(3004, "Không thể xóa chuyên khoa do đang có bác sĩ trực thuộc. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT),
+
+    // Examination Room domain errors
+    ROOM_NOT_FOUND(4001, "Không tìm thấy thông tin phòng khám yêu cầu", HttpStatus.NOT_FOUND),
+    ROOM_NUMBER_EXISTS(4002, "Số phòng khám đã tồn tại trong cùng khu nhà / tòa nhà", HttpStatus.CONFLICT),
+    CANNOT_DELETE_ROOM_WITH_SCHEDULES(4003, "Không thể xóa phòng khám do đang có lịch làm việc của bác sĩ hoặc giao dịch liên kết. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
