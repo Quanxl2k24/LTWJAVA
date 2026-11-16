@@ -6,6 +6,7 @@ import org.example.feature.auth.dto.*;
 import org.example.feature.hello.dto.HelloResponse;
 import org.example.feature.room.dto.*;
 import org.example.feature.specialty.dto.*;
+import org.example.feature.timeslot.dto.*;
 import org.example.feature.users.dto.*;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -19,6 +20,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +49,7 @@ class ApplicationTest {
     private static Long createdDoctorUserId;
     private static Integer createdSpecialtyId;
     private static Integer createdRoomId;
+    private static Integer createdTimeSlotId;
 
     @Test
     @Order(1)
@@ -891,6 +894,141 @@ class ApplicationTest {
                 getLocalServerUrl() + "api/v1/examination-rooms/" + createdRoomId,
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(notFoundResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @Order(38)
+    void shouldAllowPublicAccessToTimeSlots() {
+        ResponseEntity<ApiResponse<List<TimeSlotResponse>>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<List<TimeSlotResponse>>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(200);
+    }
+
+    @Test
+    @Order(39)
+    void shouldAllowAdminToCreateNewTimeSlot() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        TimeSlotCreateRequest request = TimeSlotCreateRequest.builder()
+                .startTime(LocalTime.of(7, 30))
+                .endTime(LocalTime.of(8, 0))
+                .build();
+
+        ResponseEntity<ApiResponse<TimeSlotResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots",
+                HttpMethod.POST,
+                new HttpEntity<>(request, headers),
+                new ParameterizedTypeReference<ApiResponse<TimeSlotResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        TimeSlotResponse created = response.getBody().getData();
+        assertThat(created.getStartTime()).isEqualTo(LocalTime.of(7, 30));
+        assertThat(created.getEndTime()).isEqualTo(LocalTime.of(8, 0));
+        assertThat(created.getSession()).isEqualTo("morning");
+        createdTimeSlotId = created.getId();
+    }
+
+    @Test
+    @Order(40)
+    void shouldRejectTimeSlotWithInvalidTimeOrder() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        TimeSlotCreateRequest invalidRequest = TimeSlotCreateRequest.builder()
+                .startTime(LocalTime.of(9, 0))
+                .endTime(LocalTime.of(8, 0)) // start > end
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots",
+                HttpMethod.POST,
+                new HttpEntity<>(invalidRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().getCode()).isEqualTo(5002); // SLOT_TIME_INVALID
+    }
+
+    @Test
+    @Order(41)
+    void shouldRejectOverlappingTimeSlot() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        TimeSlotCreateRequest overlapRequest = TimeSlotCreateRequest.builder()
+                .startTime(LocalTime.of(7, 45))
+                .endTime(LocalTime.of(8, 15)) // Overlaps with 07:30 - 08:00
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots",
+                HttpMethod.POST,
+                new HttpEntity<>(overlapRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().getCode()).isEqualTo(5003); // SLOT_OVERLAPPED_OR_EXISTS
+    }
+
+    @Test
+    @Order(42)
+    void shouldAllowAdminToUpdateTimeSlot() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        TimeSlotUpdateRequest updateRequest = TimeSlotUpdateRequest.builder()
+                .startTime(LocalTime.of(7, 0))
+                .endTime(LocalTime.of(7, 30))
+                .session("morning")
+                .build();
+
+        ResponseEntity<ApiResponse<TimeSlotResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots/" + createdTimeSlotId,
+                HttpMethod.PUT,
+                new HttpEntity<>(updateRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<TimeSlotResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getData().getStartTime()).isEqualTo(LocalTime.of(7, 0));
+        assertThat(response.getBody().getData().getEndTime()).isEqualTo(LocalTime.of(7, 30));
+    }
+
+    @Test
+    @Order(43)
+    void shouldAllowAdminToDeleteTimeSlot() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots/" + createdTimeSlotId,
+                HttpMethod.DELETE,
+                new HttpEntity<>(null, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Gọi lại thì phải báo NOT_FOUND
+        ResponseEntity<ApiResponse<Void>> notFoundResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/time-slots/" + createdTimeSlotId,
+                HttpMethod.GET,
+                null,
                 new ParameterizedTypeReference<ApiResponse<Void>>() {}
         );
         assertThat(notFoundResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
