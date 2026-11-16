@@ -38,7 +38,13 @@ public enum ErrorCode {
     // Examination Room domain errors
     ROOM_NOT_FOUND(4001, "Không tìm thấy thông tin phòng khám yêu cầu", HttpStatus.NOT_FOUND),
     ROOM_NUMBER_EXISTS(4002, "Số phòng khám đã tồn tại trong cùng khu nhà / tòa nhà", HttpStatus.CONFLICT),
-    CANNOT_DELETE_ROOM_WITH_SCHEDULES(4003, "Không thể xóa phòng khám do đang có lịch làm việc của bác sĩ hoặc giao dịch liên kết. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT);
+    CANNOT_DELETE_ROOM_WITH_SCHEDULES(4003, "Không thể xóa phòng khám do đang có lịch làm việc của bác sĩ hoặc giao dịch liên kết. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT),
+
+    // Time Slot domain errors
+    SLOT_NOT_FOUND(5001, "Không tìm thấy khung giờ khám yêu cầu", HttpStatus.NOT_FOUND),
+    SLOT_TIME_INVALID(5002, "Thời gian không hợp lệ: Giờ kết thúc phải lớn hơn giờ bắt đầu", HttpStatus.BAD_REQUEST),
+    SLOT_OVERLAPPED_OR_EXISTS(5003, "Khung giờ khám bị trùng lặp với một khung giờ đã có", HttpStatus.CONFLICT),
+    CANNOT_DELETE_SLOT_IN_USE(5004, "Không thể xóa khung giờ khám vì đã có ca trực của bác sĩ sử dụng khung giờ này", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
