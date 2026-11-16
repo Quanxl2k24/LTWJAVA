@@ -27,7 +27,13 @@ public enum ErrorCode {
     ROLE_NOT_FOUND(2007, "Vai trò người dùng không tồn tại trong hệ thống", HttpStatus.NOT_FOUND),
     OLD_PASSWORD_INCORRECT(2008, "Mật khẩu hiện tại không chính xác", HttpStatus.BAD_REQUEST),
     PASSWORD_CONFIRMATION_MISMATCH(2009, "Xác nhận mật khẩu mới không trùng khớp", HttpStatus.BAD_REQUEST),
-    CANNOT_DELETE_USER_WITH_DEPENDENCIES(2010, "Không thể xóa người dùng do đã có dữ liệu giao dịch hoặc hồ sơ liên quan", HttpStatus.CONFLICT);
+    CANNOT_DELETE_USER_WITH_DEPENDENCIES(2010, "Không thể xóa người dùng do đã có dữ liệu giao dịch hoặc hồ sơ liên quan", HttpStatus.CONFLICT),
+
+    // Specialty domain errors
+    SPECIALTY_NOT_FOUND(3001, "Không tìm thấy thông tin chuyên khoa yêu cầu", HttpStatus.NOT_FOUND),
+    SPECIALTY_NAME_EXISTS(3002, "Tên chuyên khoa đã tồn tại trên hệ thống", HttpStatus.CONFLICT),
+    SPECIALTY_SLUG_EXISTS(3003, "Đường dẫn slug chuyên khoa đã được sử dụng", HttpStatus.CONFLICT),
+    CANNOT_DELETE_SPECIALTY_HAS_DOCTORS(3004, "Không thể xóa chuyên khoa do đang có bác sĩ trực thuộc. Vui lòng tắt hoạt động thay vì xóa.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
