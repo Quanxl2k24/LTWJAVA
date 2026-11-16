@@ -4,6 +4,7 @@ import org.example.common.api.ApiResponse;
 import org.example.common.api.PageResponse;
 import org.example.feature.auth.dto.*;
 import org.example.feature.hello.dto.HelloResponse;
+import org.example.feature.room.dto.*;
 import org.example.feature.specialty.dto.*;
 import org.example.feature.users.dto.*;
 import org.junit.jupiter.api.MethodOrderer;
@@ -45,6 +46,7 @@ class ApplicationTest {
     private static String savedAdminAccessToken;
     private static Long createdDoctorUserId;
     private static Integer createdSpecialtyId;
+    private static Integer createdRoomId;
 
     @Test
     @Order(1)
@@ -741,6 +743,154 @@ class ApplicationTest {
                 getLocalServerUrl() + "api/v1/specialties/" + createdSpecialtyId,
                 HttpMethod.GET,
                 null,
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(notFoundResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @Order(32)
+    void shouldAllowAdminToCreateNewExaminationRoom() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ExaminationRoomCreateRequest request = ExaminationRoomCreateRequest.builder()
+                .roomNumber("P.301")
+                .building("Khu B - Tầng 3")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<ExaminationRoomResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms",
+                HttpMethod.POST,
+                new HttpEntity<>(request, headers),
+                new ParameterizedTypeReference<ApiResponse<ExaminationRoomResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        ExaminationRoomResponse created = response.getBody().getData();
+        assertThat(created.getRoomNumber()).isEqualTo("P.301");
+        assertThat(created.getBuilding()).isEqualTo("Khu B - Tầng 3");
+        assertThat(created.getIsActive()).isTrue();
+        createdRoomId = created.getId();
+    }
+
+    @Test
+    @Order(33)
+    void shouldRejectDuplicateRoomNumberInSameBuilding() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ExaminationRoomCreateRequest duplicate = ExaminationRoomCreateRequest.builder()
+                .roomNumber("P.301")
+                .building("Khu B - Tầng 3")
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms",
+                HttpMethod.POST,
+                new HttpEntity<>(duplicate, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().getCode()).isEqualTo(4002); // ROOM_NUMBER_EXISTS
+    }
+
+    @Test
+    @Order(34)
+    void shouldAllowStaffToGetBuildings() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<List<String>>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/buildings",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<List<String>>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getData()).contains("Khu B - Tầng 3");
+    }
+
+    @Test
+    @Order(35)
+    void shouldAllowStaffToGetActiveRooms() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<List<ExaminationRoomResponse>>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/active",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<List<ExaminationRoomResponse>>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getData()).isNotEmpty();
+    }
+
+    @Test
+    @Order(36)
+    void shouldAllowAdminToUpdateRoomAndToggleStatus() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        // 1. Cập nhật thông tin phòng
+        ExaminationRoomUpdateRequest updateRequest = ExaminationRoomUpdateRequest.builder()
+                .roomNumber("P.301-VIP")
+                .building("Khu B - Tầng 3 (Khu VIP)")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<ExaminationRoomResponse>> updateResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/" + createdRoomId,
+                HttpMethod.PUT,
+                new HttpEntity<>(updateRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<ExaminationRoomResponse>>() {}
+        );
+
+        assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updateResponse.getBody().getData().getRoomNumber()).isEqualTo("P.301-VIP");
+
+        // 2. Chuyển phòng sang trạng thái bảo trì (isActive = false)
+        UpdateRoomStatusRequest statusRequest = UpdateRoomStatusRequest.builder()
+                .isActive(false)
+                .build();
+
+        ResponseEntity<ApiResponse<ExaminationRoomResponse>> statusResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/" + createdRoomId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(statusRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<ExaminationRoomResponse>>() {}
+        );
+
+        assertThat(statusResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(statusResponse.getBody().getData().getIsActive()).isFalse();
+    }
+
+    @Test
+    @Order(37)
+    void shouldAllowAdminToDeleteRoom() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<Void>> deleteResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/" + createdRoomId,
+                HttpMethod.DELETE,
+                new HttpEntity<>(null, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(deleteResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Gọi lại thì phải báo NOT_FOUND
+        ResponseEntity<ApiResponse<Void>> notFoundResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/examination-rooms/" + createdRoomId,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
                 new ParameterizedTypeReference<ApiResponse<Void>>() {}
         );
         assertThat(notFoundResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
