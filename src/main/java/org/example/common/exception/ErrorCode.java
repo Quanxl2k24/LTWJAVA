@@ -23,7 +23,11 @@ public enum ErrorCode {
     EMAIL_ALREADY_EXISTS(2003, "Email đã được đăng ký trên hệ thống", HttpStatus.CONFLICT),
     PHONE_ALREADY_EXISTS(2004, "Số điện thoại đã được đăng ký trên hệ thống", HttpStatus.CONFLICT),
     USER_INACTIVE(2005, "Tài khoản của bạn hiện đang bị tạm khóa", HttpStatus.FORBIDDEN),
-    INVALID_TOKEN(2006, "Token không hợp lệ hoặc phiên đăng nhập đã hết hạn", HttpStatus.UNAUTHORIZED);
+    INVALID_TOKEN(2006, "Token không hợp lệ hoặc phiên đăng nhập đã hết hạn", HttpStatus.UNAUTHORIZED),
+    ROLE_NOT_FOUND(2007, "Vai trò người dùng không tồn tại trong hệ thống", HttpStatus.NOT_FOUND),
+    OLD_PASSWORD_INCORRECT(2008, "Mật khẩu hiện tại không chính xác", HttpStatus.BAD_REQUEST),
+    PASSWORD_CONFIRMATION_MISMATCH(2009, "Xác nhận mật khẩu mới không trùng khớp", HttpStatus.BAD_REQUEST),
+    CANNOT_DELETE_USER_WITH_DEPENDENCIES(2010, "Không thể xóa người dùng do đã có dữ liệu giao dịch hoặc hồ sơ liên quan", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

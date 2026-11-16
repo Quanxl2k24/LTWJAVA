@@ -1,10 +1,10 @@
 package org.example;
 
 import org.example.common.api.ApiResponse;
+import org.example.common.api.PageResponse;
 import org.example.feature.auth.dto.*;
 import org.example.feature.hello.dto.HelloResponse;
-import org.example.feature.sample.dto.SampleCreateRequest;
-import org.example.feature.sample.dto.SampleResponse;
+import org.example.feature.users.dto.*;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -16,6 +16,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +41,8 @@ class ApplicationTest {
 
     private static String savedRefreshTokenCookie;
     private static String savedPatientAccessToken;
+    private static String savedAdminAccessToken;
+    private static Long createdDoctorUserId;
 
     @Test
     @Order(1)
@@ -60,47 +63,6 @@ class ApplicationTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getCode()).isEqualTo(200);
         assertThat(response.getBody().getData().getMessage()).isEqualTo("Hello World!");
-    }
-
-    @Test
-    @Order(3)
-    void shouldCreateAndRetrieveSampleSuccessfully() {
-        SampleCreateRequest request = SampleCreateRequest.builder()
-                .name("Test Product")
-                .description("Demo description")
-                .build();
-
-        ResponseEntity<ApiResponse<SampleResponse>> createResponse = restTemplate.exchange(
-                getLocalServerUrl() + "api/v1/samples",
-                HttpMethod.POST,
-                new HttpEntity<>(request),
-                new ParameterizedTypeReference<ApiResponse<SampleResponse>>() {}
-        );
-
-        assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(createResponse.getBody()).isNotNull();
-        assertThat(createResponse.getBody().getCode()).isEqualTo(200);
-        assertThat(createResponse.getBody().getData().getName()).isEqualTo("Test Product");
-    }
-
-    @Test
-    @Order(4)
-    void shouldReturnStandardErrorWhenValidationFails() {
-        SampleCreateRequest invalidRequest = SampleCreateRequest.builder()
-                .name("")
-                .description("Invalid payload")
-                .build();
-
-        ResponseEntity<ApiResponse<Object>> errorResponse = restTemplate.exchange(
-                getLocalServerUrl() + "api/v1/samples",
-                HttpMethod.POST,
-                new HttpEntity<>(invalidRequest),
-                new ParameterizedTypeReference<ApiResponse<Object>>() {}
-        );
-
-        assertThat(errorResponse.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-        assertThat(errorResponse.getBody()).isNotNull();
-        assertThat(errorResponse.getBody().getCode()).isEqualTo(422);
     }
 
     @Test
@@ -409,6 +371,232 @@ class ApplicationTest {
         assertThat(multiRoleResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(multiRoleResponse.getBody().getCode()).isEqualTo(200);
         assertThat(multiRoleResponse.getBody().getData()).isEqualTo("ADMIN");
+
+        savedAdminAccessToken = adminAccessToken;
+    }
+
+    @Test
+    @Order(18)
+    void shouldAllowAdminToCreateNewDoctorUser() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        UserCreateRequest request = UserCreateRequest.builder()
+                .phone("0988776655")
+                .email("doctor.le@hospital.com")
+                .password("Doctor@2026")
+                .fullName("Bác sĩ Lê Thị Hoa")
+                .roleId(2) // DOCTOR
+                .gender("female")
+                .dateOfBirth(LocalDate.of(1988, 4, 12))
+                .address("Hà Nội")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<UserResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users",
+                HttpMethod.POST,
+                new HttpEntity<>(request, headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getCode()).isEqualTo(200);
+        UserResponse createdUser = response.getBody().getData();
+        assertThat(createdUser.getPhone()).isEqualTo("0988776655");
+        assertThat(createdUser.getEmail()).isEqualTo("doctor.le@hospital.com");
+        assertThat(createdUser.getFullName()).isEqualTo("Bác sĩ Lê Thị Hoa");
+        assertThat(createdUser.getRole().getCode()).isEqualTo("DOCTOR");
+        createdDoctorUserId = createdUser.getId();
+    }
+
+    @Test
+    @Order(19)
+    void shouldRejectPatientFromCreatingUser() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        UserCreateRequest request = UserCreateRequest.builder()
+                .phone("0911223344")
+                .fullName("User Bất Hợp Pháp")
+                .roleId(1)
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users",
+                HttpMethod.POST,
+                new HttpEntity<>(request, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().getCode()).isEqualTo(403);
+    }
+
+    @Test
+    @Order(20)
+    void shouldAllowAdminToGetUsersWithPagingAndFiltering() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<PageResponse<UserResponse>>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users?roleId=2&page=1&size=10",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<PageResponse<UserResponse>>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        PageResponse<UserResponse> page = response.getBody().getData();
+        assertThat(page.getItems()).isNotEmpty();
+        assertThat(page.getItems()).allMatch(u -> "DOCTOR".equals(u.getRole().getCode()));
+    }
+
+    @Test
+    @Order(21)
+    void shouldAllowAdminToGetUserDetailById() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        ResponseEntity<ApiResponse<UserResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/" + createdDoctorUserId,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getData().getId()).isEqualTo(createdDoctorUserId);
+        assertThat(response.getBody().getData().getFullName()).isEqualTo("Bác sĩ Lê Thị Hoa");
+    }
+
+    @Test
+    @Order(22)
+    void shouldAllowAdminToUpdateUser() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        UserUpdateRequest updateRequest = UserUpdateRequest.builder()
+                .fullName("Bác sĩ Lê Thị Hoa (CKII)")
+                .email("doctor.le.updated@hospital.com")
+                .roleId(2)
+                .gender("female")
+                .dateOfBirth(LocalDate.of(1988, 4, 12))
+                .address("Hà Đông, Hà Nội")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<UserResponse>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/" + createdDoctorUserId,
+                HttpMethod.PUT,
+                new HttpEntity<>(updateRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getData().getFullName()).isEqualTo("Bác sĩ Lê Thị Hoa (CKII)");
+        assertThat(response.getBody().getData().getEmail()).isEqualTo("doctor.le.updated@hospital.com");
+    }
+
+    @Test
+    @Order(23)
+    void shouldAllowAdminToLockAndUnlockUser() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedAdminAccessToken);
+
+        // Khóa tài khoản
+        UpdateUserStatusRequest lockRequest = UpdateUserStatusRequest.builder()
+                .isActive(false)
+                .reason("Tạm khóa để kiểm tra")
+                .build();
+
+        ResponseEntity<ApiResponse<UserResponse>> lockResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/" + createdDoctorUserId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(lockRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(lockResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(lockResponse.getBody().getData().getIsActive()).isFalse();
+
+        // Mở khóa lại
+        UpdateUserStatusRequest unlockRequest = UpdateUserStatusRequest.builder()
+                .isActive(true)
+                .reason("Mở khóa sau kiểm tra")
+                .build();
+
+        ResponseEntity<ApiResponse<UserResponse>> unlockResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/" + createdDoctorUserId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(unlockRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(unlockResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(unlockResponse.getBody().getData().getIsActive()).isTrue();
+    }
+
+    @Test
+    @Order(24)
+    void shouldAllowUserToViewAndSelfUpdateProfile() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        // 1. Xem profile cá nhân
+        ResponseEntity<ApiResponse<UserResponse>> profileResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/profile",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(profileResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(profileResponse.getBody().getData().getPhone()).isEqualTo("0912345678");
+
+        // 2. Cập nhật profile cá nhân
+        UserProfileUpdateRequest updateProfile = UserProfileUpdateRequest.builder()
+                .fullName("Nguyễn Văn An (Đã Sửa)")
+                .gender("male")
+                .dateOfBirth(LocalDate.of(1995, 6, 20))
+                .address("Ba Đình, Hà Nội")
+                .build();
+
+        ResponseEntity<ApiResponse<UserResponse>> updateResponse = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/profile",
+                HttpMethod.PUT,
+                new HttpEntity<>(updateProfile, headers),
+                new ParameterizedTypeReference<ApiResponse<UserResponse>>() {}
+        );
+
+        assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updateResponse.getBody().getData().getFullName()).isEqualTo("Nguyễn Văn An (Đã Sửa)");
+        assertThat(updateResponse.getBody().getData().getAddress()).isEqualTo("Ba Đình, Hà Nội");
+    }
+
+    @Test
+    @Order(25)
+    void shouldAllowUserToChangePasswordSuccessfully() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(savedPatientAccessToken);
+
+        ChangePasswordRequest changePasswordRequest = ChangePasswordRequest.builder()
+                .currentPassword("Password@123")
+                .newPassword("NewPassword@2026")
+                .confirmPassword("NewPassword@2026")
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> response = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/users/change-password",
+                HttpMethod.PUT,
+                new HttpEntity<>(changePasswordRequest, headers),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getMessage()).contains("thành công");
     }
 
     private String getLocalServerUrl() {
