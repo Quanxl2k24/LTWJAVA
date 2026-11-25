@@ -5,6 +5,7 @@ import org.example.common.api.PageResponse;
 import org.example.feature.auth.dto.*;
 import org.example.feature.doctorprofile.dto.*;
 import org.example.feature.hello.dto.HelloResponse;
+import org.example.feature.medicalservice.dto.*;
 import org.example.feature.room.dto.*;
 import org.example.feature.specialty.dto.*;
 import org.example.feature.timeslot.dto.*;
@@ -56,6 +57,8 @@ class ApplicationTest {
     private static Integer doctorTestSpecialtyId;
     private static Long createdDoctorProfileId;
     private static String savedDoctorAccessToken;
+    private static Integer createdSpecialtyServiceId;
+    private static Integer createdGeneralServiceId;
 
     @Test
     @Order(1)
@@ -1263,6 +1266,191 @@ class ApplicationTest {
         );
         assertThat(adminList.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(adminList.getBody().getData().getItems()).hasSize(1);
+    }
+
+    @Test
+    @Order(50)
+    void shouldAllowAdminToCreateMedicalServicesBothSpecialtyAndGeneral() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        // 1. Tạo dịch vụ gắn chuyên khoa (doctorTestSpecialtyId đang active)
+        CreateMedicalServiceRequest specialtyServiceReq = CreateMedicalServiceRequest.builder()
+                .specialtyId(doctorTestSpecialtyId)
+                .name("Khám Nội tổng quát chuyên sâu")
+                .price(new BigDecimal("200000.00"))
+                .estimatedDurationMin(25)
+                .description("Khám lâm sàng và tư vấn")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<MedicalServiceResponse>> res1 = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.POST,
+                new HttpEntity<>(specialtyServiceReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<MedicalServiceResponse>>() {}
+        );
+        assertThat(res1.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(res1.getBody().getData().getSpecialty()).isNotNull();
+        createdSpecialtyServiceId = res1.getBody().getData().getId();
+
+        // 2. Tạo dịch vụ dùng chung (specialtyId = null)
+        CreateMedicalServiceRequest generalServiceReq = CreateMedicalServiceRequest.builder()
+                .specialtyId(null)
+                .name("Xét nghiệm máu tổng quát")
+                .price(new BigDecimal("150000.00"))
+                .estimatedDurationMin(15)
+                .description("Dịch vụ dùng chung")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<MedicalServiceResponse>> res2 = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.POST,
+                new HttpEntity<>(generalServiceReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<MedicalServiceResponse>>() {}
+        );
+        assertThat(res2.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(res2.getBody().getData().getSpecialty()).isNull();
+        createdGeneralServiceId = res2.getBody().getData().getId();
+    }
+
+    @Test
+    @Order(51)
+    void shouldRejectInvalidMedicalServiceInput() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        CreateMedicalServiceRequest invalidReq = CreateMedicalServiceRequest.builder()
+                .name("")
+                .price(new BigDecimal("-50.00"))
+                .estimatedDurationMin(2) // < 5
+                .build();
+
+        ResponseEntity<ApiResponse<Object>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.POST,
+                new HttpEntity<>(invalidReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<Object>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(res.getBody().getCode()).isEqualTo(422);
+    }
+
+    @Test
+    @Order(52)
+    void shouldRejectPatientAndDoctorFromModifyingMedicalServices() {
+        HttpHeaders patientHeaders = new HttpHeaders();
+        patientHeaders.setBearerAuth(savedPatientAccessToken);
+
+        HttpHeaders doctorHeaders = new HttpHeaders();
+        doctorHeaders.setBearerAuth(savedDoctorAccessToken);
+
+        CreateMedicalServiceRequest createReq = CreateMedicalServiceRequest.builder()
+                .name("Dịch vụ trái phép")
+                .price(new BigDecimal("100000.00"))
+                .build();
+
+        // PATIENT gọi POST -> 403
+        ResponseEntity<ApiResponse<Void>> postRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.POST,
+                new HttpEntity<>(createReq, patientHeaders),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(postRes.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // DOCTOR gọi PUT /status -> 403
+        UpdateMedicalServiceStatusRequest statusReq = UpdateMedicalServiceStatusRequest.builder()
+                .isActive(false)
+                .build();
+        ResponseEntity<ApiResponse<Void>> statusRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services/" + createdGeneralServiceId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(statusReq, doctorHeaders),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(statusRes.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @Order(53)
+    void shouldIncludeBothGeneralAndSpecialtyServicesViaLeftJoinForPublic() {
+        ResponseEntity<ApiResponse<PageResponse<MedicalServiceResponse>>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services?page=0&size=10&sort=price,asc",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<PageResponse<MedicalServiceResponse>>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<MedicalServiceResponse> items = res.getBody().getData().getItems();
+        assertThat(items).hasSize(2);
+        assertThat(items).extracting(MedicalServiceResponse::getId)
+                .containsExactly(createdGeneralServiceId, createdSpecialtyServiceId);
+    }
+
+    @Test
+    @Order(54)
+    void shouldHideServiceWhenParentSpecialtyIsDisabledForPublicButVisibleToAdmin() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        // 1. Tắt chuyên khoa cha (doctorTestSpecialtyId)
+        UpdateSpecialtyStatusRequest disableSpec = UpdateSpecialtyStatusRequest.builder()
+                .isActive(false)
+                .build();
+        ResponseEntity<ApiResponse<SpecialtyResponse>> specRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/specialties/" + doctorTestSpecialtyId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(disableSpec, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<SpecialtyResponse>>() {}
+        );
+        assertThat(specRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 2. Public gọi GET / -> chỉ còn dịch vụ dùng chung (specialty_id = NULL)
+        ResponseEntity<ApiResponse<PageResponse<MedicalServiceResponse>>> publicRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<PageResponse<MedicalServiceResponse>>>() {}
+        );
+        assertThat(publicRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(publicRes.getBody().getData().getItems())
+                .extracting(MedicalServiceResponse::getId)
+                .containsExactly(createdGeneralServiceId);
+
+        // 3. Admin gọi GET / -> vẫn thấy đủ cả 2 dịch vụ
+        ResponseEntity<ApiResponse<PageResponse<MedicalServiceResponse>>> adminRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<PageResponse<MedicalServiceResponse>>>() {}
+        );
+        assertThat(adminRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(adminRes.getBody().getData().getItems()).hasSize(2);
+    }
+
+    @Test
+    @Order(55)
+    void shouldRejectActivatingServiceWhenParentSpecialtyIsInactive() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        UpdateMedicalServiceStatusRequest activateReq = UpdateMedicalServiceStatusRequest.builder()
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/medical-services/" + createdSpecialtyServiceId + "/status",
+                HttpMethod.PUT,
+                new HttpEntity<>(activateReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(res.getBody().getCode()).isEqualTo(6004); // SPECIALTY_INACTIVE
     }
 
     private String getLocalServerUrl() {
