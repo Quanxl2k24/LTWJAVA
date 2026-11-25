@@ -44,7 +44,13 @@ public enum ErrorCode {
     SLOT_NOT_FOUND(5001, "Không tìm thấy khung giờ khám yêu cầu", HttpStatus.NOT_FOUND),
     SLOT_TIME_INVALID(5002, "Thời gian không hợp lệ: Giờ kết thúc phải lớn hơn giờ bắt đầu", HttpStatus.BAD_REQUEST),
     SLOT_OVERLAPPED_OR_EXISTS(5003, "Khung giờ khám bị trùng lặp với một khung giờ đã có", HttpStatus.CONFLICT),
-    CANNOT_DELETE_SLOT_IN_USE(5004, "Không thể xóa khung giờ khám vì đã có ca trực của bác sĩ sử dụng khung giờ này", HttpStatus.CONFLICT);
+    CANNOT_DELETE_SLOT_IN_USE(5004, "Không thể xóa khung giờ khám vì đã có ca trực của bác sĩ sử dụng khung giờ này", HttpStatus.CONFLICT),
+
+    // Doctor Profile domain errors
+    DOCTOR_PROFILE_NOT_FOUND(6001, "Không tìm thấy hồ sơ bác sĩ yêu cầu", HttpStatus.NOT_FOUND),
+    DOCTOR_PROFILE_ALREADY_EXISTS(6002, "Người dùng này đã có hồ sơ bác sĩ trong hệ thống", HttpStatus.CONFLICT),
+    INVALID_USER_ROLE(6003, "Tài khoản được chọn không có vai trò Bác sĩ (DOCTOR)", HttpStatus.BAD_REQUEST),
+    SPECIALTY_INACTIVE(6004, "Chuyên khoa được chọn hiện đang tạm ngưng hoạt động", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

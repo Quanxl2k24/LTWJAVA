@@ -39,13 +39,22 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
             requireRole = handlerMethod.getBeanType().getAnnotation(RequireRole.class);
         }
 
-        // Nếu endpoint không có @RequireRole -> Cho phép truy cập tự do (public endpoint)
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+
+        // Nếu endpoint không có @RequireRole (public endpoint)
+        // Vẫn cố gắng trích xuất UserPrincipal nếu client có gửi Bearer Token hợp lệ
         if (requireRole == null) {
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7).trim();
+                if (!token.isEmpty() && jwtTokenProvider.validateToken(token)) {
+                    UserPrincipal principal = buildPrincipalFromToken(token);
+                    request.setAttribute(CurrentUserArgumentResolver.CURRENT_USER_ATTRIBUTE, principal);
+                }
+            }
             return true;
         }
 
-        // 1. Kiểm tra header Authorization
-        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        // 1. Kiểm tra header Authorization bắt buộc cho endpoint có @RequireRole
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             throw new AppException(ErrorCode.UNAUTHORIZED, "Vui lòng đăng nhập và cung cấp Bearer Access Token");
         }
@@ -56,31 +65,13 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
         }
 
         // 2. Trích xuất thông tin người dùng từ token claims
-        Claims claims = jwtTokenProvider.extractClaims(token);
-        Long userId = null;
-        try {
-            userId = Long.parseLong(claims.getSubject());
-        } catch (NumberFormatException e) {
-            log.warn("Subject trong JWT không phải là userId hợp lệ: {}", claims.getSubject());
-        }
-
-        String userRole = claims.get("role", String.class);
-        String email = claims.get("email", String.class);
-        String phone = claims.get("phone", String.class);
-        String fullName = claims.get("fullName", String.class);
-
-        UserPrincipal principal = UserPrincipal.builder()
-                .id(userId)
-                .email(email)
-                .phone(phone)
-                .role(userRole)
-                .fullName(fullName)
-                .build();
+        UserPrincipal principal = buildPrincipalFromToken(token);
 
         // Lưu thông tin người dùng vào request attribute để dùng cho @CurrentUser
         request.setAttribute(CurrentUserArgumentResolver.CURRENT_USER_ATTRIBUTE, principal);
 
         // 3. Kiểm tra phân quyền vai trò (Role Authorization)
+        String userRole = principal.getRole();
         String[] allowedRoles = requireRole.value();
         if (allowedRoles.length > 0) {
             if (userRole == null || userRole.isBlank()) {
@@ -92,13 +83,31 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
 
             if (!isAuthorized) {
                 log.warn("Truy cập bị từ chối: User id={} với vai trò '{}' yêu cầu một trong các vai trò {}",
-                        userId, userRole, Arrays.toString(allowedRoles));
+                        principal.getId(), userRole, Arrays.toString(allowedRoles));
                 throw new AppException(ErrorCode.FORBIDDEN,
                         "Bạn không có quyền thực hiện thao tác này. Yêu cầu một trong các vai trò: " + Arrays.toString(allowedRoles));
             }
         }
 
         return true;
+    }
+
+    private UserPrincipal buildPrincipalFromToken(String token) {
+        Claims claims = jwtTokenProvider.extractClaims(token);
+        Long userId = null;
+        try {
+            userId = Long.parseLong(claims.getSubject());
+        } catch (NumberFormatException e) {
+            log.warn("Subject trong JWT không phải là userId hợp lệ: {}", claims.getSubject());
+        }
+
+        return UserPrincipal.builder()
+                .id(userId)
+                .email(claims.get("email", String.class))
+                .phone(claims.get("phone", String.class))
+                .role(claims.get("role", String.class))
+                .fullName(claims.get("fullName", String.class))
+                .build();
     }
 }
 
