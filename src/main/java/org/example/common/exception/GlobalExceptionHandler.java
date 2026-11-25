@@ -2,6 +2,7 @@ package org.example.common.exception;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.common.api.ApiResponse;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -73,6 +74,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
         ApiResponse<Void> response = ApiResponse.error(ErrorCode.METHOD_NOT_ALLOWED, ex.getMessage());
         return new ResponseEntity<>(response, HttpStatus.METHOD_NOT_ALLOWED);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation occurred: {}", ex.getMostSpecificCause().getMessage());
+        ApiResponse<Void> response = ApiResponse.error(ErrorCode.CONFLICT, "Dữ liệu đã tồn tại hoặc vi phạm ràng buộc toàn vẹn dữ liệu");
+        return new ResponseEntity<>(response, HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(Exception.class)

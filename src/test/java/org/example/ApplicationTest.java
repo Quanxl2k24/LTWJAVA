@@ -3,6 +3,7 @@ package org.example;
 import org.example.common.api.ApiResponse;
 import org.example.common.api.PageResponse;
 import org.example.feature.auth.dto.*;
+import org.example.feature.doctorprofile.dto.*;
 import org.example.feature.hello.dto.HelloResponse;
 import org.example.feature.room.dto.*;
 import org.example.feature.specialty.dto.*;
@@ -19,9 +20,11 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
@@ -50,6 +53,9 @@ class ApplicationTest {
     private static Integer createdSpecialtyId;
     private static Integer createdRoomId;
     private static Integer createdTimeSlotId;
+    private static Integer doctorTestSpecialtyId;
+    private static Long createdDoctorProfileId;
+    private static String savedDoctorAccessToken;
 
     @Test
     @Order(1)
@@ -1032,6 +1038,231 @@ class ApplicationTest {
                 new ParameterizedTypeReference<ApiResponse<Void>>() {}
         );
         assertThat(notFoundResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @Order(44)
+    void shouldAllowAdminToCreateDoctorProfile() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        // 1. Tạo chuyên khoa mới để gắn cho bác sĩ
+        SpecialtyCreateRequest specialtyReq = SpecialtyCreateRequest.builder()
+                .name("Khoa Nội Tổng Hợp")
+                .description("Khám nội khoa")
+                .isActive(true)
+                .build();
+
+        ResponseEntity<ApiResponse<SpecialtyResponse>> specRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/specialties",
+                HttpMethod.POST,
+                new HttpEntity<>(specialtyReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<SpecialtyResponse>>() {}
+        );
+        assertThat(specRes.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        doctorTestSpecialtyId = specRes.getBody().getData().getId();
+
+        // 2. Tạo DoctorProfile cho user bác sĩ (createdDoctorUserId đã tạo ở Order 18)
+        CreateDoctorProfileRequest createReq = CreateDoctorProfileRequest.builder()
+                .userId(createdDoctorUserId)
+                .specialtyId(doctorTestSpecialtyId)
+                .title("  ThS. BS CKII  ")
+                .experienceYears(12)
+                .biography("Hơn 12 năm kinh nghiệm điều trị nội khoa.")
+                .consultationFee(new BigDecimal("350000.00"))
+                .isAvailable(true)
+                .build();
+
+        ResponseEntity<ApiResponse<DoctorProfileAdminResponse>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles",
+                HttpMethod.POST,
+                new HttpEntity<>(createReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<DoctorProfileAdminResponse>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(res.getBody()).isNotNull();
+        DoctorProfileAdminResponse created = res.getBody().getData();
+        assertThat(created.getTitle()).isEqualTo("ThS. BS CKII");
+        assertThat(created.getConsultationFee()).isEqualByComparingTo("350000.00");
+        assertThat(created.getUser().getId()).isEqualTo(createdDoctorUserId);
+        assertThat(created.getSpecialty().getId()).isEqualTo(doctorTestSpecialtyId);
+        createdDoctorProfileId = created.getId();
+    }
+
+    @Test
+    @Order(45)
+    void shouldRejectInvalidDoctorProfileInput() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        CreateDoctorProfileRequest invalidReq = CreateDoctorProfileRequest.builder()
+                .userId(createdDoctorUserId)
+                .specialtyId(doctorTestSpecialtyId)
+                .title("A".repeat(51)) // > 50 ký tự
+                .consultationFee(new BigDecimal("-100.00")) // âm
+                .build();
+
+        ResponseEntity<ApiResponse<Object>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles",
+                HttpMethod.POST,
+                new HttpEntity<>(invalidReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<Object>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(res.getBody().getCode()).isEqualTo(422);
+    }
+
+    @Test
+    @Order(46)
+    void shouldRejectPatientFromCreatingOrUpdatingDoctorProfile() {
+        HttpHeaders patientHeaders = new HttpHeaders();
+        patientHeaders.setBearerAuth(savedPatientAccessToken);
+
+        CreateDoctorProfileRequest createReq = CreateDoctorProfileRequest.builder()
+                .userId(createdDoctorUserId)
+                .specialtyId(doctorTestSpecialtyId)
+                .consultationFee(new BigDecimal("200000.00"))
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> postRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles",
+                HttpMethod.POST,
+                new HttpEntity<>(createReq, patientHeaders),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(postRes.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        UpdateDoctorProfileRequest putReq = UpdateDoctorProfileRequest.builder()
+                .specialtyId(doctorTestSpecialtyId)
+                .consultationFee(new BigDecimal("200000.00"))
+                .build();
+
+        ResponseEntity<ApiResponse<Void>> putRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles/" + createdDoctorProfileId,
+                HttpMethod.PUT,
+                new HttpEntity<>(putReq, patientHeaders),
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(putRes.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @Order(47)
+    void shouldAllowPublicToGetDoctorProfilesWithoutSensitiveUserFields() {
+        // Gọi không có token (Public)
+        ResponseEntity<ApiResponse<PageResponse<Map<String, Object>>>> res = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles?keyword=ThS",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<PageResponse<Map<String, Object>>>>() {}
+        );
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<Map<String, Object>> items = res.getBody().getData().getItems();
+        assertThat(items).isNotEmpty();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userMap = (Map<String, Object>) items.get(0).get("user");
+        assertThat(userMap).containsKeys("id", "fullName", "gender");
+        assertThat(userMap).doesNotContainKeys("passwordHash", "address", "dateOfBirth", "phone", "email");
+    }
+
+    @Test
+    @Order(48)
+    void shouldAllowDoctorToGetAndUpdateOwnProfileViaMeRoute() {
+        // 1. Đăng nhập tài khoản bác sĩ
+        LoginRequest doctorLogin = LoginRequest.builder()
+                .identifier("0988776655")
+                .password("Doctor@2026")
+                .build();
+
+        ResponseEntity<ApiResponse<LoginResponse>> loginRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/auth/login",
+                HttpMethod.POST,
+                new HttpEntity<>(doctorLogin),
+                new ParameterizedTypeReference<ApiResponse<LoginResponse>>() {}
+        );
+        assertThat(loginRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        savedDoctorAccessToken = loginRes.getBody().getData().getAccessToken();
+
+        HttpHeaders doctorHeaders = new HttpHeaders();
+        doctorHeaders.setBearerAuth(savedDoctorAccessToken);
+
+        // 2. GET /api/v1/doctor-profiles/me (chứng minh không conflict với /{id})
+        ResponseEntity<ApiResponse<DoctorProfileAdminResponse>> meRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles/me",
+                HttpMethod.GET,
+                new HttpEntity<>(doctorHeaders),
+                new ParameterizedTypeReference<ApiResponse<DoctorProfileAdminResponse>>() {}
+        );
+        assertThat(meRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(meRes.getBody().getData().getId()).isEqualTo(createdDoctorProfileId);
+
+        // 3. PUT /api/v1/doctor-profiles/me (tự cập nhật biography)
+        UpdateMyDoctorProfileRequest updateBio = UpdateMyDoctorProfileRequest.builder()
+                .biography("Tiểu sử mới cập nhật bởi chính bác sĩ.")
+                .build();
+
+        ResponseEntity<ApiResponse<DoctorProfileAdminResponse>> updateMeRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles/me",
+                HttpMethod.PUT,
+                new HttpEntity<>(updateBio, doctorHeaders),
+                new ParameterizedTypeReference<ApiResponse<DoctorProfileAdminResponse>>() {}
+        );
+        assertThat(updateMeRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updateMeRes.getBody().getData().getBiography()).isEqualTo("Tiểu sử mới cập nhật bởi chính bác sĩ.");
+    }
+
+    @Test
+    @Order(49)
+    void shouldHideUnavailableDoctorFromPublicButShowToAdmin() {
+        HttpHeaders adminHeaders = new HttpHeaders();
+        adminHeaders.setBearerAuth(savedAdminAccessToken);
+
+        // 1. Tắt isAvailable = false
+        UpdateDoctorAvailabilityRequest availReq = UpdateDoctorAvailabilityRequest.builder()
+                .isAvailable(false)
+                .build();
+
+        ResponseEntity<ApiResponse<DoctorProfileAdminResponse>> availRes = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles/" + createdDoctorProfileId + "/availability",
+                HttpMethod.PUT,
+                new HttpEntity<>(availReq, adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<DoctorProfileAdminResponse>>() {}
+        );
+        assertThat(availRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(availRes.getBody().getData().getIsAvailable()).isFalse();
+
+        // 2. Public gọi GET /{id} -> phải trả 404
+        ResponseEntity<ApiResponse<Void>> publicGetById = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles/" + createdDoctorProfileId,
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<Void>>() {}
+        );
+        assertThat(publicGetById.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        // 3. Public gọi GET / -> không xuất hiện trong kết quả
+        ResponseEntity<ApiResponse<PageResponse<Map<String, Object>>>> publicList = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<ApiResponse<PageResponse<Map<String, Object>>>>() {}
+        );
+        assertThat(publicList.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(publicList.getBody().getData().getItems()).isEmpty();
+
+        // 4. Admin gọi GET / -> vẫn thấy đầy đủ
+        ResponseEntity<ApiResponse<PageResponse<DoctorProfileAdminResponse>>> adminList = restTemplate.exchange(
+                getLocalServerUrl() + "api/v1/doctor-profiles",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders),
+                new ParameterizedTypeReference<ApiResponse<PageResponse<DoctorProfileAdminResponse>>>() {}
+        );
+        assertThat(adminList.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(adminList.getBody().getData().getItems()).hasSize(1);
     }
 
     private String getLocalServerUrl() {
